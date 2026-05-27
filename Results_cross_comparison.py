@@ -4,6 +4,7 @@ import itertools
 from collections import Counter
 import os
 import io
+from datetime import datetime
 
 # --- 頁面基本設定與全域 CSS ---
 st.set_page_config(page_title="539 雙邏輯深度比對系統", layout="wide")
@@ -161,7 +162,7 @@ def generate_method_report(method_name, all_valid_rows, stars, win_nums):
     total_nums = len(flat_nums)
     num_counts = Counter(flat_nums)
     
-    # ------------------ Part 1: 單碼統計 ------------------
+    # --- Part 1: 單碼統計 ---
     p1 = []
     freq_to_nums = {}
     for i in range(1, 40):
@@ -185,7 +186,7 @@ def generate_method_report(method_name, all_valid_rows, stars, win_nums):
             line_str = ""
     if line_str: p1.append(line_str)
 
-    # ------------------ Part 2: 命中總表 ------------------
+    # --- Part 2: 命中總表 ---
     p2 = []
     star_counters = {}
     for size in stars:
@@ -222,7 +223,7 @@ def generate_method_report(method_name, all_valid_rows, stars, win_nums):
                 str_m1 = " ".join([f"({','.join([f'{x:02d}' for x in h])})" for h in hits_miss_one])
                 p2.append(f"　 ２. [☆差一碼 {len(hits_miss_one):>2} 組]: {str_m1}" if hits_miss_one else "　 ２. [☆差一碼  0 組]")
 
-    # ------------------ Part 3: 詳細名單 ------------------
+    # --- Part 3: 詳細名單 ---
     p3 = []
     for size in stars:
         p3.append(f"========== [ {size} 星 詳細列表 ] ==========")
@@ -245,7 +246,7 @@ def generate_method_report(method_name, all_valid_rows, stars, win_nums):
     return "\n".join(p1), "\n".join(p2), "\n".join(p3), star_counters
 
 # ==========================================
-# 差異與命中比對產生器 (加入進階過濾命中標記)
+# 差異與命中比對產生器
 # ==========================================
 def generate_comparison_reports(counters_strict, counters_sorted, stars, win_nums, f_a, f_b, d_opts):
     win_set = set(win_nums) if win_nums else set()
@@ -289,7 +290,7 @@ def generate_comparison_reports(counters_strict, counters_sorted, stars, win_num
                     c2.append(f"☆ ({','.join([f'{x:02d}' for x in m])}): [落球] {cA.get(m,0)} 次 vs [大小] {cB.get(m,0)} 次")
         c2.append("")
 
-        # --- 比對 3: 進階過濾 (加入命中標記) ---
+        # --- 比對 3: 進階過濾 ---
         if f_a > 0 and f_b > 0 and d_opts:
             c3.append(f"========== 🎯 {size} 星 進階過濾 ==========")
             c_A_tgt = [c for c, count in cA.items() if count == f_a]
@@ -304,22 +305,17 @@ def generate_comparison_reports(counters_strict, counters_sorted, stars, win_num
                         set_a = set(c_a)
                         for c_b in c_B_tgt:
                             if size - len(set_a.intersection(c_b)) == d:
-                                # 替 A 加上命中標記
                                 str_a = f"({','.join([f'{x:02d}' for x in c_a])})"
                                 if win_set:
-                                    mc_a = len(set_a.intersection(win_set))
-                                    if mc_a == size: str_a += " [★全中]"
-                                    elif mc_a == size - 1: str_a += " [☆差一碼]"
+                                    if len(set_a.intersection(win_set)) == size: str_a += "[★]"
+                                    elif len(set_a.intersection(win_set)) == size - 1: str_a += "[☆]"
                                 
-                                # 替 B 加上命中標記
                                 str_b = f"({','.join([f'{x:02d}' for x in c_b])})"
                                 if win_set:
-                                    mc_b = len(set(c_b).intersection(win_set))
-                                    if mc_b == size: str_b += " [★全中]"
-                                    elif mc_b == size - 1: str_b += " [☆差一碼]"
+                                    if len(set(c_b).intersection(win_set)) == size: str_b += "[★]"
+                                    elif len(set(c_b).intersection(win_set)) == size - 1: str_b += "[☆]"
 
                                 matches.append(f"落球 {str_a} <-> 大小 {str_b}")
-                    
                     if matches:
                         has_any_match = True
                         c3.append(f"[ 相差 {d} 號 ] 共 {len(matches)} 對:")
@@ -334,7 +330,7 @@ def generate_comparison_reports(counters_strict, counters_sorted, stars, win_num
     return "\n".join(c1), "\n".join(c2), "\n".join(c3)
 
 # ==========================================
-# Excel 匯出引擎 (保留所有排版)
+# Excel 匯出引擎 
 # ==========================================
 def format_excel_sheet(worksheet, data_list):
     row_idx = 1
@@ -395,7 +391,6 @@ def prepare_excel_data(all_valid_rows, counters, stars, win_nums):
     return sheet_data
 
 def prepare_comparison_excel_data(report_str):
-    """直接將生成的比對字串拆解寫入 Excel"""
     sheet_data = []
     lines = report_str.split("\n")
     current_group = {"header": "", "combos": []}
@@ -450,10 +445,16 @@ if st.button("🚀 執行雙邏輯運算與比對", type="primary"):
         format_excel_sheet(workbook.add_worksheet('比對-命中與聽牌'), prepare_comparison_excel_data(comp_p2))
         format_excel_sheet(workbook.add_worksheet('比對-進階過濾'), prepare_comparison_excel_data(comp_p3))
 
+    excel_data = output.getvalue()
+    
+    # --- 動態時間檔名設定 ---
+    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dynamic_filename = f"{current_time}_539分析報表.xlsx"
+
     st.download_button(
-        label="📥 點擊下載完整分析報表 (Excel / .xlsx)",
-        data=output.getvalue(),
-        file_name="539_analysis_report.xlsx",
+        label=f"📥 點擊下載完整分析報表 (將存為 {dynamic_filename})",
+        data=excel_data,
+        file_name=dynamic_filename,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="primary"
     )
