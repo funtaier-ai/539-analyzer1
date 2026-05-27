@@ -245,7 +245,7 @@ def generate_method_report(method_name, all_valid_rows, stars, win_nums):
     return "\n".join(p1), "\n".join(p2), "\n".join(p3), star_counters
 
 # ==========================================
-# 差異與命中比對產生器 (分拆為三部分返回)
+# 差異與命中比對產生器 (加入進階過濾命中標記)
 # ==========================================
 def generate_comparison_reports(counters_strict, counters_sorted, stars, win_nums, f_a, f_b, d_opts):
     win_set = set(win_nums) if win_nums else set()
@@ -289,7 +289,7 @@ def generate_comparison_reports(counters_strict, counters_sorted, stars, win_num
                     c2.append(f"☆ ({','.join([f'{x:02d}' for x in m])}): [落球] {cA.get(m,0)} 次 vs [大小] {cB.get(m,0)} 次")
         c2.append("")
 
-        # --- 比對 3: 進階過濾 ---
+        # --- 比對 3: 進階過濾 (加入命中標記) ---
         if f_a > 0 and f_b > 0 and d_opts:
             c3.append(f"========== 🎯 {size} 星 進階過濾 ==========")
             c_A_tgt = [c for c, count in cA.items() if count == f_a]
@@ -304,7 +304,22 @@ def generate_comparison_reports(counters_strict, counters_sorted, stars, win_num
                         set_a = set(c_a)
                         for c_b in c_B_tgt:
                             if size - len(set_a.intersection(c_b)) == d:
-                                matches.append(f"落球 ({','.join([f'{x:02d}' for x in c_a])}) <-> 大小 ({','.join([f'{x:02d}' for x in c_b])})")
+                                # 替 A 加上命中標記
+                                str_a = f"({','.join([f'{x:02d}' for x in c_a])})"
+                                if win_set:
+                                    mc_a = len(set_a.intersection(win_set))
+                                    if mc_a == size: str_a += " [★全中]"
+                                    elif mc_a == size - 1: str_a += " [☆差一碼]"
+                                
+                                # 替 B 加上命中標記
+                                str_b = f"({','.join([f'{x:02d}' for x in c_b])})"
+                                if win_set:
+                                    mc_b = len(set(c_b).intersection(win_set))
+                                    if mc_b == size: str_b += " [★全中]"
+                                    elif mc_b == size - 1: str_b += " [☆差一碼]"
+
+                                matches.append(f"落球 {str_a} <-> 大小 {str_b}")
+                    
                     if matches:
                         has_any_match = True
                         c3.append(f"[ 相差 {d} 號 ] 共 {len(matches)} 對:")
@@ -339,150 +354,4 @@ def format_excel_sheet(worksheet, data_list):
             if col_idx != 0: row_idx += 1 
         row_idx += 1
 
-def prepare_excel_data(all_valid_rows, counters, stars, win_nums):
-    sheet_data = []
-    win_set = set(win_nums) if win_nums else set()
-    if not all_valid_rows: return [{"header": "無有效行數產生", "combos": []}]
-
-    flat_nums = [n for row in all_valid_rows for n in row]
-    total_nums = len(flat_nums)
-    num_counts = Counter(flat_nums)
-    
-    freq_to_nums = {}
-    for i in range(1, 40): freq_to_nums.setdefault(num_counts.get(i, 0), []).append(i)
-
-    sheet_data.append({"header": "【 1星(單碼) 數據總表 】", "combos": []})
-    sheet_data.append({"header": f"總計產出數字數量: {total_nums}", "combos": []})
-    sheet_data.append({"header": "[ 單碼出現次數排行 (由高至低) ]", "combos": []})
-    for freq in sorted(freq_to_nums.keys(), reverse=True):
-        sheet_data.append({"header": f"出現 {freq} 次:", "combos": [" ".join([f"({n:02d})" for n in sorted(freq_to_nums[freq])])]})
-        
-    sheet_data.append({"header": "[ 01~39 各號碼詳細總數與佔比 ]", "combos": []})
-    ratio_list = [f"({i:02d}) {num_counts.get(i, 0)}次({(num_counts.get(i, 0) / total_nums * 100) if total_nums > 0 else 0:.2f}%)" for i in range(1, 40)]
-    sheet_data.append({"header": "", "combos": ratio_list})
-
-    for size in stars:
-        sheet_data.append({"header": f"========== [{size}星 詳細列表] ==========", "combos": []})
-        counter = counters.get(size, Counter())
-        freq_dict = {}
-        for combo, count in counter.items(): freq_dict.setdefault(count, []).append(combo)
-            
-        for count in sorted(freq_dict.keys(), reverse=True):
-            formatted_combos = []
-            for c in sorted(freq_dict[count]):
-                c_str = f"({','.join([f'{x:02d}' for x in c])})"
-                if win_set:
-                    match_count = len(set(c).intersection(win_set))
-                    if match_count == size: c_str += " [★全中]"
-                    elif match_count == size - 1: c_str += " [☆差一碼]"
-                formatted_combos.append(c_str)
-            sheet_data.append({"header": f"出現 {count} 次:", "combos": formatted_combos})
-    return sheet_data
-
-def prepare_comparison_excel_data(report_str):
-    """直接將生成的比對字串拆解寫入 Excel"""
-    sheet_data = []
-    lines = report_str.split("\n")
-    current_group = {"header": "", "combos": []}
-    
-    for line in lines:
-        if line.startswith("========== ") or line.startswith("▶") or line.startswith("[") or line.startswith("❌") or line.startswith("✅") or line.startswith("⚠️"):
-            if current_group["header"] or current_group["combos"]:
-                sheet_data.append(current_group)
-            current_group = {"header": line.strip(), "combos": []}
-        elif line.strip():
-            current_group["combos"].append(line.strip())
-            
-    if current_group["header"] or current_group["combos"]:
-        sheet_data.append(current_group)
-    return sheet_data
-
-# --- UI 渲染輔助 ---
-def render_wrapped_text(text, height=400):
-    st.markdown(f'<div class="custom-scrollbar" style="height: {height}px;">{text}</div>', unsafe_allow_html=True)
-
-# --- 4. 執行與運算區 ---
-if st.button("🚀 執行雙邏輯運算與比對", type="primary"):
-    if df is None: st.warning("請先載入資料庫！"); st.stop()
-    if None in n_inputs: st.error("T-1 必須全部填寫！"); st.stop()
-    inputs = [int(x) for x in n_inputs]
-    if len(set(inputs)) != 5: st.error("T-1 不能有重複！"); st.stop()
-
-    win_nums = []
-    empty_win_count = win_inputs.count(None)
-    if empty_win_count == 0:
-        win_nums = [int(x) for x in win_inputs]
-        if len(set(win_nums)) != 5: st.error("T 開獎號碼不能有重複！"); st.stop()
-    elif empty_win_count < 5: st.error("T 請麼全填，要麼全留空。"); st.stop()
-    if not selected_stars: st.error("請至少勾選一種星數！"); st.stop()
-
-    # 執行運算
-    valid_strict = compute_data(df, inputs, mode, True)
-    valid_sorted = compute_data(df, inputs, mode, False)
-
-    str_p1, str_p2, str_p3, c_strict = generate_method_report("落球順序", valid_strict, selected_stars, win_nums)
-    srt_p1, srt_p2, srt_p3, c_sorted = generate_method_report("大小順序", valid_sorted, selected_stars, win_nums)
-    
-    comp_p1, comp_p2, comp_p3 = generate_comparison_reports(c_strict, c_sorted, selected_stars, win_nums, freq_a, freq_b, diff_opts)
-
-    # 產出 Excel
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        workbook = writer.book
-        format_excel_sheet(workbook.add_worksheet('落球順序'), prepare_excel_data(valid_strict, c_strict, selected_stars, win_nums))
-        format_excel_sheet(workbook.add_worksheet('大小順序'), prepare_excel_data(valid_sorted, c_sorted, selected_stars, win_nums))
-        format_excel_sheet(workbook.add_worksheet('比對-基礎差異'), prepare_comparison_excel_data(comp_p1))
-        format_excel_sheet(workbook.add_worksheet('比對-命中與聽牌'), prepare_comparison_excel_data(comp_p2))
-        format_excel_sheet(workbook.add_worksheet('比對-進階過濾'), prepare_comparison_excel_data(comp_p3))
-
-    st.download_button(
-        label="📥 點擊下載完整分析報表 (Excel / .xlsx)",
-        data=output.getvalue(),
-        file_name="539_analysis_report.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary"
-    )
-
-    # --- UI 渲染區 ---
-    st.header("📊 雙邏輯運算結果對照")
-
-    st.subheader("📌 第一部分：1星(單碼) 數據總表")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**【 落球順序 】**")
-        render_wrapped_text(str_p1, height=350)
-    with col2:
-        st.markdown("**【 大小順序 】**")
-        render_wrapped_text(srt_p1, height=350)
-
-    st.subheader("📌 第二部分：命中與次數總表")
-    col3, col4 = st.columns(2)
-    with col3:
-        st.markdown("**【 落球順序 】**")
-        render_wrapped_text(str_p2, height=400)
-    with col4:
-        st.markdown("**【 大小順序 】**")
-        render_wrapped_text(srt_p2, height=400)
-
-    st.subheader("📌 第三部分：詳細組合名單")
-    col5, col6 = st.columns(2)
-    with col5:
-        st.markdown("**【 落球順序 】**")
-        render_wrapped_text(str_p3, height=500)
-    with col6:
-        st.markdown("**【 大小順序 】**")
-        render_wrapped_text(srt_p3, height=500)
-
-    st.markdown("---")
-    st.header("⚖️ 邏輯深度比對區")
-
-    st.subheader("🔍 比對 1：每個出現次數的差異組合 (基礎比對)")
-    render_wrapped_text(comp_p1, height=450)
-
-    st.subheader("🎯 比對 2：命中與聽牌(差一碼)組合 比對")
-    render_wrapped_text(comp_p2, height=350)
-
-    st.subheader("⚙️ 比對 3：進階過濾 (落球 vs 大小 相似度比對)")
-    render_wrapped_text(comp_p3, height=450)
-
-    st.success("運算與排版更新完成！")
+def prepare_excel_data(all_valid_rows, counters, stars, win_
