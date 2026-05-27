@@ -85,8 +85,8 @@ for i in range(5):
     w_val = win_cols[i].number_input(f"開獎 {i+1}", min_value=1, max_value=39, step=1, value=None, key=f"w{i}")
     win_inputs.append(w_val)
 
-# --- 3. 卦象與星數選擇 ---
-params_col1, params_col2 = st.columns(2)
+# --- 3. 參數設定區 (新增相似度配對選項) ---
+params_col1, params_col2, params_col3 = st.columns(3)
 with params_col1:
     mode = st.selectbox("選擇篩選模式:", ["中卦", "上卦", "上2卦", "下卦", "下2卦"])
 with params_col2:
@@ -96,8 +96,15 @@ with params_col2:
     s3 = s_cols[1].checkbox("3星", value=True)
     s4 = s_cols[2].checkbox("4星", value=True)
     s5 = s_cols[3].checkbox("5星", value=True)
-    
     selected_stars = [s for s, chk in zip([2, 3, 4, 5], [s2, s3, s4, s5]) if chk]
+with params_col3:
+    st.write("跨邏輯相似度配對 (A vs B):")
+    d_cols = st.columns(4)
+    d0 = d_cols[0].checkbox("相同", value=False)
+    d1 = d_cols[1].checkbox("差1碼", value=False)
+    d2 = d_cols[2].checkbox("差2碼", value=False)
+    d3 = d_cols[3].checkbox("差3碼", value=False)
+    selected_diffs = [i for i, chk in enumerate([d0, d1, d2, d3]) if chk]
 
 # ==========================================
 # 核心邏輯引擎
@@ -150,7 +157,7 @@ def compute_data(df_data, inputs_list, exec_mode, is_strict_drop_order):
     return group1_merged + group2_merged
 
 # ==========================================
-# 報表產生器 (提供 UI 顯示)
+# 報表產生器 (UI 顯示)
 # ==========================================
 def generate_method_report(method_name, all_valid_rows, stars, win_nums):
     if not all_valid_rows:
@@ -260,9 +267,9 @@ def generate_method_report(method_name, all_valid_rows, stars, win_nums):
     return "\n".join(out), star_counters
 
 # ==========================================
-# 差異與命中比對產生器 (UI 顯示)
+# 差異與命中比對產生器 (加入同次數相似度比對)
 # ==========================================
-def generate_comparison_report(counters_strict, counters_sorted, stars, win_nums):
+def generate_comparison_report(counters_strict, counters_sorted, stars, win_nums, selected_diffs):
     win_set = set(win_nums) if win_nums else set()
     out = []
     out.append("【 雙邏輯深度比對分析 】\n")
@@ -272,7 +279,8 @@ def generate_comparison_report(counters_strict, counters_sorted, stars, win_nums
         cA = counters_strict.get(size, Counter())
         cB = counters_sorted.get(size, Counter())
 
-        out.append("【 １. 每個出現次數的差異組合 】")
+        # 1. 獨有組合
+        out.append("【 １. 每個出現次數的差異組合 (各自獨有) 】")
         all_freqs = sorted(list(set(cA.values()) | set(cB.values())), reverse=True)
         has_diff = False
         
@@ -296,7 +304,43 @@ def generate_comparison_report(counters_strict, counters_sorted, stars, win_nums
         if not has_diff:
             out.append("✅ 兩者在所有次數分佈上【完全無差異】。")
 
-        out.append("\n【 ２＆３. 命中與聽牌(差一碼)組合 比對 】")
+        # 2. 跨邏輯相似度配對
+        if selected_diffs:
+            out.append("\n【 ２. 同次數組合 相似度配對 (A ➜ B) 】")
+            for freq in all_freqs:
+                combos_A = [c for c, count in cA.items() if count == freq]
+                combos_B = [c for c, count in cB.items() if count == freq]
+                
+                if not combos_A or not combos_B:
+                    continue
+                
+                freq_has_output = False
+                for diff_target in selected_diffs:
+                    if diff_target > size: continue
+                    
+                    pairs = []
+                    for ca in sorted(combos_A):
+                        set_ca = set(ca)
+                        matches = []
+                        for cb in sorted(combos_B):
+                            if size - len(set_ca.intersection(cb)) == diff_target:
+                                matches.append(cb)
+                        if matches:
+                            pairs.append((ca, matches))
+                    
+                    if pairs:
+                        if not freq_has_output:
+                            out.append(f"--- [ 出現 {freq} 次 ] ---")
+                            freq_has_output = True
+                        
+                        out.append(f"▶ 相差 {diff_target} 碼配對:")
+                        for ca, cbs in pairs:
+                            ca_str = f"({','.join([f'{x:02d}' for x in ca])})"
+                            cb_strs = " ".join([f"({','.join([f'{x:02d}' for x in cb])})" for cb in cbs])
+                            out.append(f"　[落球] {ca_str} ➜ [大小] {cb_strs}")
+
+        # 3. 命中與聽牌
+        out.append("\n【 ３. 命中與聽牌(差一碼)組合 比對 】")
         if not win_set:
             out.append("⚠️ 未輸入 T (開獎號碼)，無法比對命中。")
         else:
@@ -309,7 +353,7 @@ def generate_comparison_report(counters_strict, counters_sorted, stars, win_nums
             all_m1 = sorted(list(m1_A | m1_B))
 
             if not all_hits and not all_m1:
-                out.append("❌ 兩邊邏輯皆無任何全中或聽牌組合。")
+                out.append("❌ 皆無任何全中或聽牌組合。")
             
             if all_hits:
                 out.append("[ ★ 全中組合比對 ]")
@@ -317,7 +361,7 @@ def generate_comparison_report(counters_strict, counters_sorted, stars, win_nums
                     h_str = f"({','.join([f'{x:02d}' for x in h])})"
                     freq_A = cA.get(h, 0)
                     freq_B = cB.get(h, 0)
-                    out.append(f"★ {h_str}: [落球順序] {freq_A} 次 vs [大小順序] {freq_B} 次")
+                    out.append(f"★ {h_str}: [落球] {freq_A} 次 vs [大小] {freq_B} 次")
             
             if all_m1:
                 out.append("\n[ ☆ 差一碼(聽牌) 組合比對 ]")
@@ -325,17 +369,15 @@ def generate_comparison_report(counters_strict, counters_sorted, stars, win_nums
                     m_str = f"({','.join([f'{x:02d}' for x in m])})"
                     freq_A = cA.get(m, 0)
                     freq_B = cB.get(m, 0)
-                    out.append(f"☆ {m_str}: [落球順序] {freq_A} 次 vs [大小順序] {freq_B} 次")
-                    
+                    out.append(f"☆ {m_str}: [落球] {freq_A} 次 vs [大小] {freq_B} 次")
         out.append("\n")
         
     return "\n".join(out)
 
 # ==========================================
-# Excel 匯出處理引擎 (完美重現所有統計與標籤)
+# Excel 匯出處理引擎
 # ==========================================
 def format_excel_sheet(worksheet, data_list):
-    """將資料寫入 Excel，單儲存格單組合，滿 6 格換行"""
     row_idx = 1
     for group in data_list:
         if group["header"]:
@@ -356,7 +398,6 @@ def format_excel_sheet(worksheet, data_list):
         row_idx += 1
 
 def prepare_excel_data(all_valid_rows, counters, stars, win_nums):
-    """將所有報表資料 (包含 1星熱度、百分比、命中標籤) 轉化為 Excel 結構"""
     sheet_data = []
     win_set = set(win_nums) if win_nums else set()
 
@@ -364,7 +405,6 @@ def prepare_excel_data(all_valid_rows, counters, stars, win_nums):
         sheet_data.append({"header": "此條件下無有效行數產生", "combos": []})
         return sheet_data
 
-    # --- 1星 (單碼) 統計 ---
     flat_nums = [n for row in all_valid_rows for n in row]
     total_nums = len(flat_nums)
     num_counts = Counter(flat_nums)
@@ -388,9 +428,8 @@ def prepare_excel_data(all_valid_rows, counters, stars, win_nums):
         c = num_counts.get(i, 0)
         ratio = (c / total_nums * 100) if total_nums > 0 else 0
         ratio_list.append(f"({i:02d}) {c}次({ratio:.2f}%)")
-    sheet_data.append({"header": "", "combos": ratio_list}) # 每列印6個
+    sheet_data.append({"header": "", "combos": ratio_list})
 
-    # --- N星 組合與標籤 ---
     for size in stars:
         sheet_data.append({"header": f"========== [{size}星 詳細列表] ==========", "combos": []})
         counter = counters.get(size, Counter())
@@ -402,7 +441,6 @@ def prepare_excel_data(all_valid_rows, counters, stars, win_nums):
         for count in sorted(freq_dict.keys(), reverse=True):
             combo_list = sorted(freq_dict[count])
             
-            # 加入命中與聽牌標籤
             formatted_combos = []
             for c in combo_list:
                 c_str = f"({','.join([f'{x:02d}' for x in c])})"
@@ -421,8 +459,7 @@ def prepare_excel_data(all_valid_rows, counters, stars, win_nums):
             
     return sheet_data
 
-def prepare_comparison_excel_data(counters_strict, counters_sorted, stars, win_nums):
-    """將雙邏輯比對的差異與命中寫入 Excel"""
+def prepare_comparison_excel_data(counters_strict, counters_sorted, stars, win_nums, selected_diffs):
     sheet_data = []
     win_set = set(win_nums) if win_nums else set()
 
@@ -430,12 +467,11 @@ def prepare_comparison_excel_data(counters_strict, counters_sorted, stars, win_n
         sheet_data.append({"header": f"========== 🎯 {size} 星 比對 ==========", "combos": []})
         cA = counters_strict.get(size, Counter())
         cB = counters_sorted.get(size, Counter())
+        all_freqs = sorted(list(set(cA.values()) | set(cB.values())), reverse=True)
 
         # 1. 差異比較
-        sheet_data.append({"header": "【 每個出現次數的差異組合 】", "combos": []})
-        all_freqs = sorted(list(set(cA.values()) | set(cB.values())), reverse=True)
+        sheet_data.append({"header": "【 １. 每個出現次數的差異組合 (各自獨有) 】", "combos": []})
         has_diff = False
-        
         for freq in all_freqs:
             combos_A = {c for c, count in cA.items() if count == freq}
             combos_B = {c for c, count in cB.items() if count == freq}
@@ -451,12 +487,44 @@ def prepare_comparison_excel_data(counters_strict, counters_sorted, stars, win_n
                 if only_B:
                     formatted = [f"({','.join([f'{x:02d}' for x in c])})" for c in only_B]
                     sheet_data.append({"header": f"　[大小順序] 獨有 ({len(only_B)}組):", "combos": formatted})
-                    
         if not has_diff:
             sheet_data.append({"header": "✅ 兩者完全無差異", "combos": []})
 
-        # 2. 命中比較
-        sheet_data.append({"header": "【 命中與聽牌(差一碼)組合 比對 】", "combos": []})
+        # 2. 相似度配對
+        if selected_diffs:
+            sheet_data.append({"header": "【 ２. 同次數組合 相似度配對 (A ➜ B) 】", "combos": []})
+            for freq in all_freqs:
+                combos_A = [c for c, count in cA.items() if count == freq]
+                combos_B = [c for c, count in cB.items() if count == freq]
+                
+                if not combos_A or not combos_B: continue
+                
+                freq_has_output = False
+                for diff_target in selected_diffs:
+                    if diff_target > size: continue
+                    pairs = []
+                    for ca in sorted(combos_A):
+                        set_ca = set(ca)
+                        matches = []
+                        for cb in sorted(combos_B):
+                            if size - len(set_ca.intersection(cb)) == diff_target:
+                                matches.append(cb)
+                        if matches:
+                            pairs.append((ca, matches))
+                    
+                    if pairs:
+                        if not freq_has_output:
+                            sheet_data.append({"header": f"--- [ 出現 {freq} 次 ] ---", "combos": []})
+                            freq_has_output = True
+                        
+                        sheet_data.append({"header": f"▶ 相差 {diff_target} 碼配對:", "combos": []})
+                        for ca, cbs in pairs:
+                            ca_str = f"({','.join([f'{x:02d}' for x in ca])})"
+                            cb_strs = [f"({','.join([f'{x:02d}' for x in cb])})" for cb in cbs]
+                            sheet_data.append({"header": f"　[落球] {ca_str} ➜ [大小]:", "combos": cb_strs})
+
+        # 3. 命中與聽牌
+        sheet_data.append({"header": "【 ３. 命中與聽牌(差一碼) 比對 】", "combos": []})
         if not win_set:
             sheet_data.append({"header": "⚠️ 未輸入 T (開獎號碼)，無法比對命中。", "combos": []})
         else:
@@ -477,7 +545,7 @@ def prepare_comparison_excel_data(counters_strict, counters_sorted, stars, win_n
                     h_str = f"({','.join([f'{x:02d}' for x in h])})"
                     freq_A = cA.get(h, 0)
                     freq_B = cB.get(h, 0)
-                    sheet_data.append({"header": f"★ {h_str}: [落球順序] {freq_A} 次 vs [大小順序] {freq_B} 次", "combos": []})
+                    sheet_data.append({"header": f"★ {h_str}: [落球] {freq_A} 次 vs [大小] {freq_B} 次", "combos": []})
             
             if all_m1:
                 sheet_data.append({"header": "[ ☆ 差一碼(聽牌) 比對 ]", "combos": []})
@@ -485,7 +553,7 @@ def prepare_comparison_excel_data(counters_strict, counters_sorted, stars, win_n
                     m_str = f"({','.join([f'{x:02d}' for x in m])})"
                     freq_A = cA.get(m, 0)
                     freq_B = cB.get(m, 0)
-                    sheet_data.append({"header": f"☆ {m_str}: [落球順序] {freq_A} 次 vs [大小順序] {freq_B} 次", "combos": []})
+                    sheet_data.append({"header": f"☆ {m_str}: [落球] {freq_A} 次 vs [大小] {freq_B} 次", "combos": []})
         sheet_data.append({"header": "", "combos": []})
         
     return sheet_data
@@ -529,7 +597,7 @@ if st.button("🚀 執行雙邏輯運算與比對", type="primary"):
 
     report_strict, counters_strict = generate_method_report("嚴格落球順序", valid_strict, selected_stars, win_nums)
     report_sorted, counters_sorted = generate_method_report("強制大小排序", valid_sorted, selected_stars, win_nums)
-    report_diff = generate_comparison_report(counters_strict, counters_sorted, selected_stars, win_nums)
+    report_diff = generate_comparison_report(counters_strict, counters_sorted, selected_stars, win_nums, selected_diffs)
 
     st.header("📊 雙邏輯運算結果與比對區")
 
@@ -538,19 +606,16 @@ if st.button("🚀 執行雙邏輯運算與比對", type="primary"):
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         workbook = writer.book
         
-        # Sheet 1: 落球順序
         ws_strict = workbook.add_worksheet('落球順序')
         strict_data = prepare_excel_data(valid_strict, counters_strict, selected_stars, win_nums)
         format_excel_sheet(ws_strict, strict_data)
         
-        # Sheet 2: 大小順序
         ws_sorted = workbook.add_worksheet('大小順序')
         sorted_data = prepare_excel_data(valid_sorted, counters_sorted, selected_stars, win_nums)
         format_excel_sheet(ws_sorted, sorted_data)
         
-        # Sheet 3: 邏輯比對
         ws_diff = workbook.add_worksheet('邏輯比對')
-        diff_data = prepare_comparison_excel_data(counters_strict, counters_sorted, selected_stars, win_nums)
+        diff_data = prepare_comparison_excel_data(counters_strict, counters_sorted, selected_stars, win_nums, selected_diffs)
         format_excel_sheet(ws_diff, diff_data)
 
     excel_data = output.getvalue()
