@@ -307,13 +307,13 @@ def generate_comparison_reports(counters_strict, counters_sorted, stars, win_num
                             if size - len(set_a.intersection(c_b)) == d:
                                 str_a = f"({','.join([f'{x:02d}' for x in c_a])})"
                                 if win_set:
-                                    if len(set_a.intersection(win_set)) == size: str_a += "[★]"
-                                    elif len(set_a.intersection(win_set)) == size - 1: str_a += "[☆]"
+                                    if len(set_a.intersection(win_set)) == size: str_a += "[★全中]"
+                                    elif len(set_a.intersection(win_set)) == size - 1: str_a += "[☆差一碼]"
                                 
                                 str_b = f"({','.join([f'{x:02d}' for x in c_b])})"
                                 if win_set:
-                                    if len(set(c_b).intersection(win_set)) == size: str_b += "[★]"
-                                    elif len(set(c_b).intersection(win_set)) == size - 1: str_b += "[☆]"
+                                    if len(set(c_b).intersection(win_set)) == size: str_b += "[★全中]"
+                                    elif len(set(c_b).intersection(win_set)) == size - 1: str_b += "[☆差一碼]"
 
                                 matches.append(f"落球 {str_a} <-> 大小 {str_b}")
                     if matches:
