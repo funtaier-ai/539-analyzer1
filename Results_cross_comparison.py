@@ -150,7 +150,7 @@ def compute_data(df_data, inputs_list, exec_mode, is_strict_drop_order):
     return group1_merged + group2_merged
 
 # ==========================================
-# 報表產生器
+# 報表產生器 (提供 UI 顯示)
 # ==========================================
 def generate_method_report(method_name, all_valid_rows, stars, win_nums):
     if not all_valid_rows:
@@ -159,7 +159,6 @@ def generate_method_report(method_name, all_valid_rows, stars, win_nums):
     win_set = set(win_nums) if win_nums else set()
     flat_nums = [n for row in all_valid_rows for n in row]
     total_nums_count = len(flat_nums)
-    
     num_counts = Counter(flat_nums)
     
     freq_to_nums = {}
@@ -191,7 +190,6 @@ def generate_method_report(method_name, all_valid_rows, stars, win_nums):
     if line_str: out.append(line_str)
 
     out.append("="*55)
-    
     out.append(f"【 {method_name}：命中與次數總表 】")
     star_counters = {}
     
@@ -215,9 +213,7 @@ def generate_method_report(method_name, all_valid_rows, stars, win_nums):
             
         for count in sorted(freq_dict.keys(), reverse=True):
             combos = freq_dict[count]
-            
-            hits_full = []
-            hits_miss_one = []
+            hits_full, hits_miss_one = [], []
             
             if win_set:
                 for c in combos:
@@ -228,21 +224,14 @@ def generate_method_report(method_name, all_valid_rows, stars, win_nums):
                         hits_miss_one.append(c)
             
             out.append(f"▶ 出現 {count:>2} 次: 共有 {len(combos):>4} 組")
-            
             if not win_set:
                 out.append("　 １. (未輸入開獎號碼，無法對獎)")
             else:
-                if hits_full:
-                    str_full = " ".join([f"({','.join([f'{x:02d}' for x in h])})" for h in hits_full])
-                    out.append(f"　 １. [★全中 {len(hits_full):>2} 組]: {str_full}")
-                else:
-                    out.append("　 １. [★全中  0 組]")
-                    
-                if hits_miss_one:
-                    str_m1 = " ".join([f"({','.join([f'{x:02d}' for x in h])})" for h in hits_miss_one])
-                    out.append(f"　 ２. [☆差一碼 {len(hits_miss_one):>2} 組]: {str_m1}")
-                else:
-                    out.append("　 ２. [☆差一碼  0 組]")
+                str_full = " ".join([f"({','.join([f'{x:02d}' for x in h])})" for h in hits_full]) if hits_full else ""
+                out.append(f"　 １. [★全中 {len(hits_full):>2} 組]: {str_full}" if hits_full else "　 １. [★全中  0 組]")
+                
+                str_m1 = " ".join([f"({','.join([f'{x:02d}' for x in h])})" for h in hits_miss_one]) if hits_miss_one else ""
+                out.append(f"　 ２. [☆差一碼 {len(hits_miss_one):>2} 組]: {str_m1}" if hits_miss_one else "　 ２. [☆差一碼  0 組]")
 
     out.append("="*55)
     out.append(f"【 {method_name}：以下為詳細組合名單 】\n")
@@ -271,7 +260,7 @@ def generate_method_report(method_name, all_valid_rows, stars, win_nums):
     return "\n".join(out), star_counters
 
 # ==========================================
-# 差異與命中比對產生器
+# 差異與命中比對產生器 (UI 顯示)
 # ==========================================
 def generate_comparison_report(counters_strict, counters_sorted, stars, win_nums):
     win_set = set(win_nums) if win_nums else set()
@@ -343,18 +332,16 @@ def generate_comparison_report(counters_strict, counters_sorted, stars, win_nums
     return "\n".join(out)
 
 # ==========================================
-# Excel 匯出處理引擎
+# Excel 匯出處理引擎 (完美重現所有統計與標籤)
 # ==========================================
 def format_excel_sheet(worksheet, data_list):
-    """將資料格式化寫入 worksheet，每列最多 6 個儲存格"""
+    """將資料寫入 Excel，單儲存格單組合，滿 6 格換行"""
     row_idx = 1
     for group in data_list:
-        # group 結構: {"header": "字串", "combos": [組合字串1, 組合字串2...]}
-        # 寫入標題列 (例如: [3星 詳細列表] 或 出現 6 次:)
-        worksheet.write(row_idx, 0, group["header"])
-        row_idx += 1
+        if group["header"]:
+            worksheet.write(row_idx, 0, group["header"])
+            row_idx += 1
         
-        # 寫入組合，每列 6 格
         combos = group.get("combos", [])
         if combos:
             col_idx = 0
@@ -365,14 +352,47 @@ def format_excel_sheet(worksheet, data_list):
                     col_idx = 0
                     row_idx += 1
             if col_idx != 0:
-                row_idx += 1 # 換行給下一個標題
-        row_idx += 1 # 區塊之間留空行
+                row_idx += 1 
+        row_idx += 1
 
-def prepare_excel_data(counters, stars):
-    """將 Counter 資料轉為準備寫入 Excel 的結構"""
+def prepare_excel_data(all_valid_rows, counters, stars, win_nums):
+    """將所有報表資料 (包含 1星熱度、百分比、命中標籤) 轉化為 Excel 結構"""
     sheet_data = []
+    win_set = set(win_nums) if win_nums else set()
+
+    if not all_valid_rows:
+        sheet_data.append({"header": "此條件下無有效行數產生", "combos": []})
+        return sheet_data
+
+    # --- 1星 (單碼) 統計 ---
+    flat_nums = [n for row in all_valid_rows for n in row]
+    total_nums = len(flat_nums)
+    num_counts = Counter(flat_nums)
+    
+    freq_to_nums = {}
+    for i in range(1, 40):
+        freq = num_counts.get(i, 0)
+        freq_to_nums.setdefault(freq, []).append(i)
+
+    sheet_data.append({"header": "【 1星(單碼) 數據總表 】", "combos": []})
+    sheet_data.append({"header": f"總計產出數字數量: {total_nums}", "combos": []})
+    
+    sheet_data.append({"header": "[ 單碼出現次數排行 (由高至低) ]", "combos": []})
+    for freq in sorted(freq_to_nums.keys(), reverse=True):
+        nums_str = " ".join([f"({n:02d})" for n in sorted(freq_to_nums[freq])])
+        sheet_data.append({"header": f"出現 {freq} 次:", "combos": [nums_str]})
+        
+    sheet_data.append({"header": "[ 01~39 各號碼詳細總數與佔比 ]", "combos": []})
+    ratio_list = []
+    for i in range(1, 40):
+        c = num_counts.get(i, 0)
+        ratio = (c / total_nums * 100) if total_nums > 0 else 0
+        ratio_list.append(f"({i:02d}) {c}次({ratio:.2f}%)")
+    sheet_data.append({"header": "", "combos": ratio_list}) # 每列印6個
+
+    # --- N星 組合與標籤 ---
     for size in stars:
-        sheet_data.append({"header": f"[{size}星 詳細列表]", "combos": []})
+        sheet_data.append({"header": f"========== [{size}星 詳細列表] ==========", "combos": []})
         counter = counters.get(size, Counter())
         
         freq_dict = {}
@@ -381,30 +401,49 @@ def prepare_excel_data(counters, stars):
             
         for count in sorted(freq_dict.keys(), reverse=True):
             combo_list = sorted(freq_dict[count])
-            formatted_combos = [f"({','.join([f'{x:02d}' for x in c])})" for c in combo_list]
+            
+            # 加入命中與聽牌標籤
+            formatted_combos = []
+            for c in combo_list:
+                c_str = f"({','.join([f'{x:02d}' for x in c])})"
+                if win_set:
+                    match_count = len(set(c).intersection(win_set))
+                    if match_count == size:
+                        c_str += " [★全中]"
+                    elif match_count == size - 1:
+                        c_str += " [☆差一碼]"
+                formatted_combos.append(c_str)
+                
             sheet_data.append({
                 "header": f"出現 {count} 次:",
                 "combos": formatted_combos
             })
+            
     return sheet_data
 
-def prepare_comparison_excel_data(counters_strict, counters_sorted, stars):
-    """整理比對資料，提取差異點準備寫入 Excel"""
+def prepare_comparison_excel_data(counters_strict, counters_sorted, stars, win_nums):
+    """將雙邏輯比對的差異與命中寫入 Excel"""
     sheet_data = []
+    win_set = set(win_nums) if win_nums else set()
+
     for size in stars:
         sheet_data.append({"header": f"========== 🎯 {size} 星 比對 ==========", "combos": []})
         cA = counters_strict.get(size, Counter())
         cB = counters_sorted.get(size, Counter())
 
+        # 1. 差異比較
+        sheet_data.append({"header": "【 每個出現次數的差異組合 】", "combos": []})
         all_freqs = sorted(list(set(cA.values()) | set(cB.values())), reverse=True)
+        has_diff = False
+        
         for freq in all_freqs:
             combos_A = {c for c, count in cA.items() if count == freq}
             combos_B = {c for c, count in cB.items() if count == freq}
-
             only_A = sorted(list(combos_A - combos_B))
             only_B = sorted(list(combos_B - combos_A))
 
             if only_A or only_B:
+                has_diff = True
                 sheet_data.append({"header": f"▶ 出現 {freq} 次的差異：", "combos": []})
                 if only_A:
                     formatted = [f"({','.join([f'{x:02d}' for x in c])})" for c in only_A]
@@ -412,8 +451,44 @@ def prepare_comparison_excel_data(counters_strict, counters_sorted, stars):
                 if only_B:
                     formatted = [f"({','.join([f'{x:02d}' for x in c])})" for c in only_B]
                     sheet_data.append({"header": f"　[大小順序] 獨有 ({len(only_B)}組):", "combos": formatted})
-    return sheet_data
+                    
+        if not has_diff:
+            sheet_data.append({"header": "✅ 兩者完全無差異", "combos": []})
 
+        # 2. 命中比較
+        sheet_data.append({"header": "【 命中與聽牌(差一碼)組合 比對 】", "combos": []})
+        if not win_set:
+            sheet_data.append({"header": "⚠️ 未輸入 T (開獎號碼)，無法比對命中。", "combos": []})
+        else:
+            hits_A = {c for c in cA.keys() if len(set(c).intersection(win_set)) == size}
+            hits_B = {c for c in cB.keys() if len(set(c).intersection(win_set)) == size}
+            all_hits = sorted(list(hits_A | hits_B))
+            
+            m1_A = {c for c in cA.keys() if len(set(c).intersection(win_set)) == size - 1}
+            m1_B = {c for c in cB.keys() if len(set(c).intersection(win_set)) == size - 1}
+            all_m1 = sorted(list(m1_A | m1_B))
+
+            if not all_hits and not all_m1:
+                sheet_data.append({"header": "❌ 皆無任何全中或聽牌組合。", "combos": []})
+            
+            if all_hits:
+                sheet_data.append({"header": "[ ★ 全中組合比對 ]", "combos": []})
+                for h in all_hits:
+                    h_str = f"({','.join([f'{x:02d}' for x in h])})"
+                    freq_A = cA.get(h, 0)
+                    freq_B = cB.get(h, 0)
+                    sheet_data.append({"header": f"★ {h_str}: [落球順序] {freq_A} 次 vs [大小順序] {freq_B} 次", "combos": []})
+            
+            if all_m1:
+                sheet_data.append({"header": "[ ☆ 差一碼(聽牌) 比對 ]", "combos": []})
+                for m in all_m1:
+                    m_str = f"({','.join([f'{x:02d}' for x in m])})"
+                    freq_A = cA.get(m, 0)
+                    freq_B = cB.get(m, 0)
+                    sheet_data.append({"header": f"☆ {m_str}: [落球順序] {freq_A} 次 vs [大小順序] {freq_B} 次", "combos": []})
+        sheet_data.append({"header": "", "combos": []})
+        
+    return sheet_data
 
 # --- 專用渲染組件 ---
 def render_wrapped_text(text):
@@ -458,30 +533,30 @@ if st.button("🚀 執行雙邏輯運算與比對", type="primary"):
 
     st.header("📊 雙邏輯運算結果與比對區")
 
-    # 產出 Excel 檔案到記憶體中，提供下載
+    # 產出 Excel 檔案
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         workbook = writer.book
         
         # Sheet 1: 落球順序
         ws_strict = workbook.add_worksheet('落球順序')
-        strict_data = prepare_excel_data(counters_strict, selected_stars)
+        strict_data = prepare_excel_data(valid_strict, counters_strict, selected_stars, win_nums)
         format_excel_sheet(ws_strict, strict_data)
         
         # Sheet 2: 大小順序
         ws_sorted = workbook.add_worksheet('大小順序')
-        sorted_data = prepare_excel_data(counters_sorted, selected_stars)
+        sorted_data = prepare_excel_data(valid_sorted, counters_sorted, selected_stars, win_nums)
         format_excel_sheet(ws_sorted, sorted_data)
         
         # Sheet 3: 邏輯比對
         ws_diff = workbook.add_worksheet('邏輯比對')
-        diff_data = prepare_comparison_excel_data(counters_strict, counters_sorted, selected_stars)
+        diff_data = prepare_comparison_excel_data(counters_strict, counters_sorted, selected_stars, win_nums)
         format_excel_sheet(ws_diff, diff_data)
 
     excel_data = output.getvalue()
     
     st.download_button(
-        label="📥 下載完整分析報表 (Excel / .xlsx)",
+        label="📥 點擊下載完整分析報表 (Excel / .xlsx)",
         data=excel_data,
         file_name="539_analysis_report.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
