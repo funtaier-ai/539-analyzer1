@@ -5,7 +5,6 @@ from collections import Counter
 import os
 import io
 from datetime import datetime
-import numpy as np
 
 # --- 頁面基本設定與全域 CSS ---
 st.set_page_config(page_title="539 雙邏輯深度比對系統 (V3 雲端旗艦版)", layout="wide")
@@ -15,7 +14,7 @@ st.markdown("""
 .custom-scrollbar {
     overflow-y: auto !important;
     overflow-x: auto !important;
-    white-space: pre !important;  /* 強制不換行以保持表格對齊 */
+    white-space: pre !important; 
     font-family: "Consolas", "Courier New", monospace !important;
     font-size: 14px !important;
     line-height: 1.6 !important;
@@ -47,40 +46,52 @@ st.markdown("""
 st.title("📱 539 雙邏輯 (落球 vs 大小) 深度比對系統")
 
 # --- 1. 資料庫載入區 ---
-uploaded_file = st.file_uploader("上傳新的 CSV 資料庫 (自動偵測格式)", type=["csv"])
+st.header("1. 資料庫載入")
+default_db_path = "539_2007.csv"
 df = None
 data_offset = 1
 
-if uploaded_file is not None:
+# 提供手動上傳覆蓋選項，預設自動讀取 Github 同目錄檔案
+uploaded_file = st.file_uploader("手動上傳其他 CSV (若不選，系統將自動讀取雲端預設 539_2007.csv)", type=["csv"])
+
+def load_dataframe(file_or_path):
     try:
-        try: temp_df = pd.read_csv(uploaded_file, encoding="utf-8")
-        except UnicodeDecodeError: temp_df = pd.read_csv(uploaded_file, encoding="cp950")
+        try: temp_df = pd.read_csv(file_or_path, encoding="utf-8")
+        except UnicodeDecodeError: temp_df = pd.read_csv(file_or_path, encoding="cp950")
         
         is_headless = False
         try:
             [float(c) for c in temp_df.columns]
             is_headless = True
-        except ValueError:
-            pass
+        except ValueError: pass
             
-        uploaded_file.seek(0) # 重置指標
+        if hasattr(file_or_path, 'seek'): file_or_path.seek(0)
+            
         if is_headless:
-            try: df = pd.read_csv(uploaded_file, encoding="utf-8", header=None)
-            except: df = pd.read_csv(uploaded_file, encoding="cp950", header=None)
-            data_offset = 0
+            try: loaded_df = pd.read_csv(file_or_path, encoding="utf-8", header=None)
+            except: loaded_df = pd.read_csv(file_or_path, encoding="cp950", header=None)
+            offset = 0
         else:
-            df = temp_df
-            data_offset = 1 if len(df.columns) >= 6 else 0
-            
-        format_msg = "6欄(含日期)" if data_offset == 1 else "5欄(純號碼)"
-        st.success(f"成功載入資料庫！(共 {len(df)} 筆, 格式: {format_msg})")
+            loaded_df = temp_df
+            offset = 1 if len(loaded_df.columns) >= 6 else 0
+        return loaded_df, offset, None
     except Exception as e:
-        st.error(f"讀檔失敗: {e}")
+        return None, 1, str(e)
+
+if uploaded_file is not None:
+    df, data_offset, err = load_dataframe(uploaded_file)
+    if err: st.error(f"手動上傳讀取失敗: {err}")
+    else: st.success(f"成功載入上傳的資料庫！(共 {len(df)} 筆, 格式: {'6欄(含日期)' if data_offset==1 else '5欄(純號碼)'})")
 else:
-    st.info("請上傳 CSV 資料庫檔案。")
+    if os.path.exists(default_db_path):
+        df, data_offset, err = load_dataframe(default_db_path)
+        if err: st.error(f"預設資料庫讀取失敗: {err}")
+        else: st.success(f"✅ 已自動載入 Github 預設資料庫：{default_db_path} (共 {len(df)} 筆, 格式: {'6欄(含日期)' if data_offset==1 else '5欄(純號碼)'})")
+    else:
+        st.error(f"找不到預設資料庫 `{default_db_path}`，請確認檔案是否已上傳至 Github 倉庫。")
 
 # --- 2. 輸入條件區 ---
-st.header("1. 輸入條件區")
+st.header("2. 輸入條件區")
 col_t, col_t1 = st.columns(2)
 
 with col_t:
@@ -98,7 +109,7 @@ m_cols = st.columns(6)
 m_inputs = [m_cols[i].text_input(f"M{i+1}", key=f"m{i}") for i in range(6)]
 
 # --- 3. 參數設定區 ---
-st.header("2. 參數設定與比對條件")
+st.header("3. 參數設定與比對條件")
 params_col1, params_col2 = st.columns(2)
 
 with params_col1:
@@ -324,9 +335,9 @@ def build_reports(c_strict, c_sorted, stars, T, win_nums, markers, f_a, f_b, all
 # ==========================================
 # 執行區與 UI 渲染
 # ==========================================
-if st.button("🚀 執行單筆運算比對", type="primary"):
+if st.button("🚀 執行運算與比對", type="primary"):
     if df is None:
-        st.warning("請先載入資料庫！")
+        st.warning("請先等待資料庫載入！")
         st.stop()
         
     T = get_valid_ints(t_inputs)
@@ -366,10 +377,11 @@ if st.button("🚀 執行單筆運算比對", type="primary"):
     dynamic_filename = f"{current_time}_539_predict_{ts_str}.xlsx"
 
     st.download_button(
-        label=f"📥 點擊下載完整分析報表 (將儲存為 {dynamic_filename})",
+        label=f"📥 點擊下載完整分析報表 (檔案: {dynamic_filename})",
         data=excel_data,
         file_name=dynamic_filename,
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary"
     )
 
     st.success("運算完成！請查閱下方報表。")
