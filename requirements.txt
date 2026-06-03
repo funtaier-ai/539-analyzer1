@@ -1,4 +1,7 @@
 streamlit
+Flask==3.0.0
 pandas
 openpyxl
 xlsxwriter
+numpy==1.26.0
+gunicorn==21.2.0
